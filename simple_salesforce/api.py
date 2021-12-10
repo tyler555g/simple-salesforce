@@ -679,6 +679,12 @@ class SFType:
                                      object_name=object_name,
                                      sf_version=sf_version))
 
+        self.composite_base_url = (
+            'https://{instance}/services/data/v{sf_version}/composite/sobjects'
+            '/{object_name}/'.format(instance=sf_instance,
+                                     object_name=object_name,
+                                     sf_version=sf_version))
+
     def metadata(self, headers=None):
         """Returns the result of a GET to `.../{object_name}/` as a dict
         decoded from the JSON payload returned by Salesforce.
@@ -741,6 +747,32 @@ class SFType:
         )
         return result.json(object_pairs_hook=OrderedDict)
 
+    def get_more(self, record_ids: list, fields=None, headers=None):
+        """Returns the result of
+        a GET to `.../{object_name}/{record_ids}/&fields={fields}` as a
+        list of dicts decoded from the JSON payload returned by Salesforce.
+
+        Arguments:
+
+        * record_id -- the Id of the SObject to get
+        * headers -- a dict with additional request headers.
+        """
+
+        record_ids_url = "?ids=" + ",".join(record_ids)
+
+        fields_url = "&fields=" + ",".join(fields)
+
+        url_joined = urljoin(self.composite_base_url, record_ids_url)
+
+        if fields_url:
+            url_joined = urljoin(url_joined, fields_url)
+
+        result = self._call_salesforce(
+            method='GET', url=url_joined,
+            headers=headers
+            )
+        return result.json(object_pairs_hook=OrderedDict)
+
     def get_by_custom_id(self, custom_id_field, custom_id, headers=None):
         """Return an ``SFType`` by custom ID
 
@@ -782,6 +814,40 @@ class SFType:
         )
         return result.json(object_pairs_hook=OrderedDict)
 
+    def create_more(self, data: list, headers=None, all_or_none=False):
+        """Creates a new SObject using a POST to `.../{object_name}/`.
+
+        Returns a list of dicts decoded from the JSON payload returned by Salesforce
+
+        Arguments:
+
+        * data -- a list of dicts of the data to create the SObject from. It will be
+                  JSON-encoded before being transmitted.
+        * headers -- a dict with additional request headers.
+        * all_or_none -- boolean value that determines whether operation should be atomic
+        """
+
+        request_data = {
+            "allOrNone" : all_or_none,
+            "records": [
+                {
+                    "attributes": {
+                        "type" : self.name,
+                        "referenceId": f"id{ind}", 
+                        **record
+                        }
+                    } for ind, record in enumerate(data)
+                ]
+            }
+
+        # referenceId required for inserting multiple records could optionally allow user to submit?
+
+        result = self._call_salesforce(
+            method='POST', url=self.composite_base_url,
+            data=json.dumps(request_data), headers=headers
+        )
+        return result.json(object_pairs_hook=OrderedDict)
+
     def upsert(self, record_id, data, raw_response=False, headers=None):
         """Creates or updates an SObject using a PATCH to
         `.../{object_name}/{record_id}`.
@@ -803,6 +869,36 @@ class SFType:
         result = self._call_salesforce(
             method='PATCH', url=urljoin(self.base_url, record_id),
             data=json.dumps(data), headers=headers
+        )
+        return self._raw_response(result, raw_response)
+
+    def upsert_more(self, external_id_field, data: list, raw_response=False, headers=None, all_or_none=False):
+        """Creates or updates an SObject using a PATCH to
+        `.../{object_name}/{external_id_field}`.
+
+        If `raw_response` is false (the default), returns the status code
+        returned by Salesforce. Otherwise, return the `requests.Response`
+        object.
+
+        Arguments:
+
+        * external_id_field -- an identifier for the SObject as described in the
+                       Salesforce documentation
+        * data -- a list of dicts of the data to create or update the SObject from. It
+                  will be JSON-encoded before being transmitted.
+        * raw_response -- a boolean indicating whether to return the response
+                          directly, instead of the status code.
+        * headers -- a dict with additional request headers.
+        * all_or_none -- boolean value that determines whether operation should be atomic
+        """
+
+        request_data = {
+            "allOrNone" : all_or_none,
+            "records": [{"attributes": {"type" : self.name,}, **record} for record in data]}
+
+        result = self._call_salesforce(
+            method='PATCH', url=urljoin(self.composite_base_url, external_id_field),
+            data=json.dumps(request_data), headers=headers
         )
         return self._raw_response(result, raw_response)
 
@@ -829,6 +925,34 @@ class SFType:
         )
         return self._raw_response(result, raw_response)
 
+    def update_more(self, data, raw_response=False, headers=None, all_or_none=False):
+        """Updates an SObject using a PATCH to
+        `.../{object_name}`.
+
+        If `raw_response` is false (the default), returns the status code
+        returned by Salesforce. Otherwise, return the `requests.Response`
+        object.
+
+        Arguments:
+
+        * data -- a list of dicts of the data to update the SObject from. It will be
+                  JSON-encoded before being transmitted.
+        * raw_response -- a boolean indicating whether to return the response
+                          directly, instead of the status code.
+        * headers -- a dict with additional request headers.
+        * all_or_none -- boolean value that determines whether operation should be atomic
+        """
+
+        request_data = {
+            "allOrNone" : all_or_none,
+            "records": [{"attributes": {"type" : self.name,}, **record} for record in data]}
+
+        result = self._call_salesforce(
+            method='PATCH', url=self.composite_base_url,
+            data=json.dumps(request_data), headers=headers
+        )
+        return self._raw_response(result, raw_response)
+
     def delete(self, record_id, raw_response=False, headers=None):
         """Deletes an SObject using a DELETE to
         `.../{object_name}/{record_id}`.
@@ -846,6 +970,28 @@ class SFType:
         """
         result = self._call_salesforce(
             method='DELETE', url=urljoin(self.base_url, record_id),
+            headers=headers
+        )
+        return self._raw_response(result, raw_response)
+
+    def delete_more(self, record_ids, raw_response=False, headers=None):
+        """Deletes an SObject using a DELETE to
+        `.../{object_name}/{record_id}`.
+
+        If `raw_response` is false (the default), returns the status code
+        returned by Salesforce. Otherwise, return the `requests.Response`
+        object.
+
+        Arguments:
+
+        * record_ids -- the Ids of the SObject to delete
+        * raw_response -- a boolean indicating whether to return the response
+                          directly, instead of the status code.
+        * headers -- a dict with additional request headers.
+        """
+
+        result = self._call_salesforce(
+            method='DELETE', url=urljoin(self.base_url, "?ids=" + ",".join(record_ids)),
             headers=headers
         )
         return self._raw_response(result, raw_response)
